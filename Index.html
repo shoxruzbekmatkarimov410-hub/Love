@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>U ♥</title>
+<style>
+html,body{margin:0;height:100%;background:#000;overflow:hidden;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:manipulation}
+.ui{position:fixed;font:500 14px/1 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;letter-spacing:.04em;color:#ff7083;
+  opacity:0;transition:opacity 1s;pointer-events:none}
+#hint{left:50%;transform:translateX(-50%);bottom:calc(30px + env(safe-area-inset-bottom,0px));white-space:nowrap;
+  text-shadow:0 0 14px rgba(255,30,60,.7)}
+#hint.show{opacity:.85}
+#again{right:16px;bottom:calc(20px + env(safe-area-inset-bottom,0px));background:rgba(255,30,60,.08);
+  border:1px solid rgba(255,60,90,.45);border-radius:99px;padding:10px 16px;cursor:pointer;font-size:13px}
+#again.show{opacity:.85;pointer-events:auto}
+#again:hover{background:rgba(255,30,60,.22)}
+#again:focus-visible{outline:2px solid #ff7083;outline-offset:3px}
+noscript{position:fixed;inset:0;display:grid;place-items:center;color:#ff3b55;font:20px system-ui}
+</style>
+</head>
+<body>
+<canvas id="c" role="img" aria-label="Yuraklar ichida U harfi. Suzib yurgan yurakchalarni bossangiz kattalashadi."></canvas>
+<div id="hint" class="ui">yurakchani bosing ♥</div>
+<button id="again" class="ui" type="button">↻ Qayta ko‘rish</button>
+<noscript>JavaScript yoqilmagan ♥</noscript>
+
+<script>
+(()=>{
+const cv=document.getElementById('c'),cx=cv.getContext('2d'),btn=document.getElementById('again'),hint=document.getElementById('hint');
+const TAU=Math.PI*2,COUNT=15,PTS=220,PER=1.2,LEAD=.8,UDUR=2.4;
+const reduce=matchMedia('(prefers-reduced-motion:reduce)').matches;
+const clamp=(v,a,b)=>Math.min(Math.max(v,a),b);
+const lerp=(a,b,t)=>a+(b-a)*t;
+const ease=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
+const outC=t=>1-Math.pow(1-t,3);
+const g=(x,m,w)=>Math.exp(-Math.pow((x-m)/w,2));
+const fr=v=>v-Math.floor(v);
+
+/* yurak egri chizig'i */
+const hp=n=>[15*Math.pow(Math.sin(n),3),12*Math.cos(n)-5*Math.cos(2*n)-2*Math.cos(3*n)-Math.cos(4*n)];
+const base=[];for(let k=0;k<=PTS;k++)base.push(hp(k/PTS*TAU));
+let minX=1e9,maxX=-1e9,minY=1e9,maxY=-1e9;
+for(const[p,q]of base){minX=Math.min(minX,p);maxX=Math.max(maxX,p);minY=Math.min(minY,q);maxY=Math.max(maxY,q)}
+const bw=(maxX-minX)*COUNT,bh=(maxY-minY)*COUNT,midY=(minY+maxY)/2;
+
+/* yurakcha (markazlashgan, ekran yo'nalishida, kengligi 30 birlik) va ichidagi U */
+const heartP=new Path2D();base.forEach(([x,y],k)=>k?heartP.lineTo(x,-(y-midY)):heartP.moveTo(x,-(y-midY)));heartP.closePath();
+const uP=new Path2D();uP.moveTo(-4.4,-7.4);uP.lineTo(-4.4,1.2);uP.arc(0,1.2,4.4,Math.PI,0,true);uP.lineTo(4.4,-7.4);
+const HEART_H=(maxY-minY)/(maxX-minX);   /* balandlik/kenglik */
+const grad=cx.createLinearGradient(0,-14,0,14);grad.addColorStop(0,'#ff5a70');grad.addColorStop(.55,'#e0143a');grad.addColorStop(1,'#a80020');
+
+function drawMiniHeart(x,y,sz,rot,alpha,beat){
+  const k=sz/30;
+  cx.save();cx.translate(x,y);cx.rotate(rot);cx.scale(k*beat,k*beat);cx.globalAlpha=alpha;
+  cx.shadowColor='rgba(255,30,60,.95)';cx.shadowBlur=Math.max(10,sz*.34);
+  cx.fillStyle=grad;cx.fill(heartP);
+  cx.shadowBlur=0;
+  cx.lineWidth=.9;cx.strokeStyle='rgba(255,205,212,.55)';cx.stroke(heartP);
+  cx.fillStyle='rgba(255,255,255,.2)';cx.beginPath();cx.ellipse(-8.2,-8.4,4.6,2.5,-.65,0,TAU);cx.fill();
+  cx.lineCap='round';cx.lineJoin='round';cx.lineWidth=2.7;
+  cx.strokeStyle='#fff6f7';cx.shadowColor='rgba(255,255,255,.9)';cx.shadowBlur=Math.max(2,sz*.06);cx.stroke(uP);
+  cx.restore();
+}
+
+let W,H,D,s,X0,Y0,ox,oy,ux,uy,uh,ua,uw,cache=null,parts=[],sparks=[];
+function layout(){
+  W=innerWidth;H=innerHeight;D=Math.min(devicePixelRatio||1,2);
+  cv.width=Math.round(W*D);cv.height=Math.round(H*D);
+  s=Math.min(W*.88/bw,H*.76/bh);
+  ox=W/2;oy=H/2-H*.015;
+  X0=ox-(minX+maxX)/2*COUNT*s;
+  Y0=oy+(minY+maxY)/2*COUNT*s;
+  ux=ox;uy=oy-bh*s*.02;uh=bh*s*.37;ua=uh*.29;uw=uh*.14;
+  cache=null;
+}
+function makeParts(){
+  const n=W<600?10:15,m=Math.min(W,H);
+  parts=Array.from({length:n},(_,i)=>{
+    const sz=clamp(m*(.075+Math.random()*.09),40,128);
+    return{sz,bx:Math.random(),v:20+sz*.42+Math.random()*12,ph:Math.random()*TAU,
+      start:i*.95+Math.random()*.6,lost:0,e:0,tgt:0,hv:0,dx:-999,dy:-999,rot:0,a:.92}});
+}
+
+function paintHearts(c,p){
+  c.lineJoin='round';c.lineCap='round';
+  const lw=Math.max(1.5,s*1.45);let tip=null;
+  for(let i=1;i<=COUNT;i++){
+    const f=clamp(p-(i-1),0,1);if(f<=0)break;
+    const nf=f*PTS,n=Math.floor(nf);
+    c.beginPath();let lx=0,ly=0;
+    for(let k=0;k<=n;k++){lx=X0+base[k][0]*i*s;ly=Y0-base[k][1]*i*s;k?c.lineTo(lx,ly):c.moveTo(lx,ly)}
+    if(n<PTS){const a=base[n],b=base[n+1],t=nf-n;
+      lx=X0+(a[0]+(b[0]-a[0])*t)*i*s;ly=Y0-(a[1]+(b[1]-a[1])*t)*i*s;c.lineTo(lx,ly)}
+    c.strokeStyle='hsl(352,100%,'+(44+i*.7)+'%)';
+    c.shadowColor='rgba(255,20,50,.9)';c.shadowBlur=Math.max(8,s*9);
+    c.lineWidth=lw;c.stroke();
+    if(f<1)tip=[lx,ly];
+  }
+  c.shadowBlur=0;return tip;
+}
+
+function drawU(u){
+  if(u<=.001)return;
+  const y1=uy-uh/2,y2=uy+uh/2-ua,L=(y2-y1)*2+Math.PI*ua;
+  const path=new Path2D();
+  path.moveTo(ux-ua,y1);path.lineTo(ux-ua,y2);path.arc(ux,y2,ua,Math.PI,0,true);path.lineTo(ux+ua,y1);
+  cx.save();cx.lineCap='round';cx.lineJoin='round';
+  cx.setLineDash([L,L+uw*3]);cx.lineDashOffset=L*(1-u);
+  cx.strokeStyle='rgba(0,0,0,.78)';cx.lineWidth=uw+uh*.12;cx.shadowColor='#000';cx.shadowBlur=uh*.3;cx.stroke(path);
+  cx.strokeStyle='#ff2a47';cx.lineWidth=uw;cx.shadowColor='rgba(255,30,60,1)';cx.shadowBlur=uh*.28;cx.stroke(path);
+  cx.strokeStyle='#fff3f4';cx.lineWidth=uw*.4;cx.shadowColor='#fff';cx.shadowBlur=uh*.05;cx.stroke(path);
+  cx.restore();
+}
+
+function burst(x,y){
+  const pal=['#ff2a47','#ff7083','#fff3f4','#ffb3bd'];
+  for(let i=0;i<34;i++){const a=Math.random()*TAU,v=60+Math.random()*220;
+    sparks.push({x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,l:1,c:pal[i%4],r:1.4+Math.random()*2})}
+}
+
+let t0=performance.now(),last=t0;
+const q=new URLSearchParams(location.search).get('t');if(q)t0-=parseFloat(q)*1000;
+const tH=LEAD+COUNT*PER,tU=tH+.15,tDone=tU+UDUR;
+let started=false,hintGone=false;
+
+function posOf(p,t){
+  const te=Math.max(0,t-tDone-p.start-p.lost),span=H+2*p.sz,dist=te*p.v,lap=Math.floor(dist/span);
+  const y=H+p.sz-(dist-lap*span);
+  const x=p.sz*.7+fr(p.bx+lap*.381966)*(W-p.sz*1.4)+Math.sin(te*.9+p.ph)*p.sz*.3;
+  return{x,y,rot:Math.sin(te*.8+p.ph)*.2,on:t-tDone-p.start-p.lost>0};
+}
+
+function frame(now){
+  const t=(now-t0)/1000,dt=Math.min((now-last)/1000,.05);last=now;
+  const p=reduce?COUNT:clamp((t-LEAD)/PER,0,COUNT);
+  const up=reduce?1:ease(clamp((t-tU)/UDUR,0,1));
+  const hDone=p>=COUNT,done=reduce||t>=tDone;
+
+  cx.setTransform(D,0,0,D,0,0);
+  cx.fillStyle='#000';cx.fillRect(0,0,W,H);
+  const R=Math.max(W,H)*.6,gl=cx.createRadialGradient(ox,oy,0,ox,oy,R);
+  gl.addColorStop(0,'rgba(255,20,40,'+(.04+.2*p/COUNT)+')');gl.addColorStop(1,'rgba(0,0,0,0)');
+  cx.fillStyle=gl;cx.fillRect(0,0,W,H);
+
+  /* suzuvchi yurakchalar (asosiy yurak ortida) */
+  let selected=null,maxE=0;
+  if(!reduce&&done){
+    for(const o of parts){
+      if(o.tgt||o.e>0)o.lost+=dt;           /* tanlanganda joyida to'xtaydi */
+      o.e=clamp(o.e+(o.tgt?1:-1)*dt/.75,0,1);
+      const ps=posOf(o,t);
+      if(!ps.on){o.dx=-999;continue}
+      o.dx=ps.x;o.dy=ps.y;o.rot=ps.rot;
+      o.hv=lerp(o.hv,o.hover?1:0,.2);
+      if(o.e>0){maxE=Math.max(maxE,o.e);selected=o;continue}
+      drawMiniHeart(o.dx,o.dy,o.sz*(1+.1*o.hv),o.rot,o.a,1);
+    }
+  }
+
+  /* asosiy yurak + U */
+  let b=1;
+  if(!reduce&&done){const ph=((t-tDone)%1.3)/1.3,amp=.03*clamp((t-tDone)/1,0,1);b=1+amp*(g(ph,.1,.06)+.7*g(ph,.3,.07))}
+  cx.save();cx.translate(ox,oy);cx.scale(b,b);cx.translate(-ox,-oy);
+  if(!hDone){
+    const tip=paintHearts(cx,p);
+    if(tip){cx.beginPath();cx.arc(tip[0],tip[1],Math.max(2.6,s*2.3),0,TAU);
+      cx.fillStyle='#fff';cx.shadowColor='#ff1e3c';cx.shadowBlur=22;cx.fill();cx.shadowBlur=0}
+  }else{
+    if(!cache){cache=document.createElement('canvas');cache.width=cv.width;cache.height=cv.height;
+      const c=cache.getContext('2d');c.setTransform(D,0,0,D,0,0);paintHearts(c,COUNT)}
+    cx.drawImage(cache,0,0,W,H);
+    drawU(up);
+  }
+  cx.restore();
+
+  /* tanlangan yurakcha: kattalashadi */
+  if(selected){
+    const ee=outC(selected.e);
+    cx.fillStyle='rgba(0,0,0,'+(.8*outC(maxE))+')';cx.fillRect(0,0,W,H);
+    const tw=Math.min(W*.8,H*.72/HEART_H);
+    const pulse=1+.03*g(((t)%1.3)/1.3,.15,.08)*ee;
+    drawMiniHeart(lerp(selected.dx,ox,ee),lerp(selected.dy,oy,ee),lerp(selected.sz,tw,ee),selected.rot*(1-ee),1,pulse);
+  }
+
+  /* uchqunlar */
+  sparks=sparks.filter(k=>k.l>0);
+  for(const k of sparks){k.x+=k.vx*dt;k.y+=k.vy*dt;k.vy+=260*dt;k.vx*=.985;k.l-=dt*1.1;
+    cx.globalAlpha=Math.max(k.l,0);cx.fillStyle=k.c;cx.shadowColor='#ff1e3c';cx.shadowBlur=8;
+    cx.beginPath();cx.arc(k.x,k.y,k.r,0,TAU);cx.fill()}
+  cx.globalAlpha=1;cx.shadowBlur=0;
+
+  if(!reduce&&done){
+    btn.classList.add('show');
+    if(!hintGone)hint.classList.add('show');
+  }
+}
+function loop(now){frame(now);requestAnimationFrame(loop)}
+
+/* boshqaruv */
+function hit(x,y){
+  for(let i=parts.length-1;i>=0;i--){
+    const o=parts[i];if(o.dx<-900||o.e>0)continue;
+    const r=Math.max(o.sz*.58,24);
+    if(Math.hypot(x-o.dx,y-o.dy)<=r)return o;
+  }return null;
+}
+cv.addEventListener('pointerdown',ev=>{
+  if(reduce||(performance.now()-t0)/1000<tDone)return;
+  const sel=parts.find(o=>o.tgt===1);
+  if(sel){sel.tgt=0;return}
+  const o=hit(ev.clientX,ev.clientY);
+  if(o){o.tgt=1;burst(o.dx,o.dy);if(!hintGone){hintGone=true;hint.classList.remove('show')}}
+});
+cv.addEventListener('pointermove',ev=>{
+  if(reduce)return;
+  const o=hit(ev.clientX,ev.clientY);
+  for(const k of parts)k.hover=(k===o);
+  cv.style.cursor=(o||parts.some(k=>k.tgt))?'pointer':'default';
+});
+addEventListener('keydown',e=>{if(e.key==='Escape')parts.forEach(o=>o.tgt=0)});
+btn.onclick=()=>{btn.classList.remove('show');hint.classList.remove('show');hintGone=false;
+  parts.forEach(o=>{o.tgt=0;o.e=0;o.lost=0});sparks=[];t0=performance.now()};
+addEventListener('resize',()=>{layout();makeParts();if(reduce)frame(performance.now())});
+
+layout();makeParts();
+if(q)window.__parts=parts;
+if(reduce)frame(performance.now());else requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
